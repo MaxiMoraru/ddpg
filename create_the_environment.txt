@@ -1,0 +1,36 @@
+# USING CONDA WITH NVIDIA GPU
+
+conda create -n ML pytorch-cuda pybullet jupyter -c nvidia -c pytorch -c conda-forge
+
+
+# USING CONDA WITH NO NVIDIA GPU
+
+conda create -n ML pytorch pybullet jupyter -c pytorch -c conda-forge
+
+
+# To activate this environment, use
+#
+#     $ conda activate ML
+#
+# To deactivate an active environment, use
+#
+#     $ conda deactivate
+
+
+ '''
+    python client_example.py name port host
+    Default parameters:
+     name: 'Example Client'
+     port: client.DEFAULT_PORT
+     host: 'localhost'
+    
+    To run the one simulation on the server, run this in 3 separate command shells:
+    > python client_example.py player_A
+    > python client_example.py player_B
+    > python server.py -auto
+    
+    To run a second simulation, select a different PORT on the server:
+    > python client_example.py player_A 9544
+    > python client_example.py player_B 9544
+    > python server.py -port 9544    
+    '''
