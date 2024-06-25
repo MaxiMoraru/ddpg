@@ -74,7 +74,6 @@ class CustomEnv():
 
         # Initialize your client for communication with the server
         self.client = client
-        self.prev_score = 0
         
         
 
@@ -86,7 +85,6 @@ class CustomEnv():
         # remove the last value of the state (dont need it)
         state = state[:-1]
 
-        self.prev_score = state[34]
 
 
         # calculate the predicted hit point and the desired paddle normal
@@ -153,7 +151,7 @@ class CustomEnv():
 
 
 
-    def calculate_reward(self,state, action):
+    def calculate_reward(self, state, action):
 
         """
             OLD State list
@@ -208,20 +206,24 @@ class CustomEnv():
         simulation_time = state[36]
         predicted_hit_point = state[37:40]
         #desired_paddle_normal = state[40:43]
-        scored = True if your_score > self.prev_score else False
 
         reward = 0
 
 
         # penalize the robot for moving
-        reward -= np.linalg.norm(action)* 0.5
+        reward -= np.linalg.norm(action)* 0.1
 
-        # reward for scoring
-        if scored:
-            reward += 1000
-
+        # reward for ball touching the opponent side of the table
+        if ball_touched_opponent_side == 1:
+            reward += 10
+            
+        # reward for hitting the ball towards the opponent
+        if ball_velocity[1] > 0:
+            reward += 1
         # prenalize for having the paddle far from the predicted hit point
-        reward -= np.linalg.norm(predicted_hit_point - paddle_position)
+        reward -= abs(predicted_hit_point[0] - paddle_position[0])*0.1
+        reward -= abs(predicted_hit_point[1] - paddle_position[1])*0.1
+        reward -= abs(predicted_hit_point[2] - paddle_position[2])*0.1
 
 
 
