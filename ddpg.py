@@ -19,21 +19,22 @@ SEED = 0
 STEPS_PER_EPOCH = 10000
 EPOCHS = 1000
 REPLAY_SIZE = int(1e6)
-GAMMA = 0.999
+GAMMA = 0.99
 POLYAK = 0.995
-PI_LR = 1e-3
+PI_LR = 1e-4
 Q_LR = 1e-3
-BATCH_SIZE = 200
-START_STEPS = 4000
-UPDATE_AFTER = 200
-UPDATE_EVERY = 10
+BATCH_SIZE = 128
+START_STEPS = 10000
+UPDATE_AFTER = 400
+UPDATE_EVERY = 50
 ACT_NOISE = 0.1
 NUM_TEST_EPISODES = 10
-MAX_EP_LEN = 500
+MAX_EP_LEN = 5000
+CHECKPOINT = False
 
 #Actor Critic
-HID_SIZE = 512
-LAYERS = 3
+HID_SIZE = 350
+LAYERS = 2
 
 
 
@@ -69,12 +70,26 @@ class ReplayBuffer:
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in batch.items()}
 
 
+def save_model(ac, pi_optimizer, q_optimizer, path):
+    torch.save({
+        'ac_state_dict': ac.state_dict(),
+        'pi_optimizer_state_dict': pi_optimizer.state_dict(),
+        'q_optimizer_state_dict': q_optimizer.state_dict(),
+    }, path)
+
+def load_model(ac, pi_optimizer, q_optimizer, path):
+    checkpoint = torch.load(path)
+    ac.load_state_dict(checkpoint['ac_state_dict'])
+    pi_optimizer.load_state_dict(checkpoint['pi_optimizer_state_dict'])
+    q_optimizer.load_state_dict(checkpoint['q_optimizer_state_dict'])
+
+
 
 def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED, 
          steps_per_epoch=STEPS_PER_EPOCH, epochs=EPOCHS, replay_size=REPLAY_SIZE, gamma=GAMMA, 
          polyak=POLYAK, pi_lr=PI_LR, q_lr=Q_LR, batch_size=BATCH_SIZE, start_steps=START_STEPS, 
          update_after=UPDATE_AFTER, update_every=UPDATE_EVERY, act_noise=ACT_NOISE, num_test_episodes=NUM_TEST_EPISODES, 
-         max_ep_len=MAX_EP_LEN, logger_kwargs=dict(), save_freq=1):
+         max_ep_len=MAX_EP_LEN, logger_kwargs=dict(), save_freq=1, checkpoint_continue=CHECKPOINT):
     """
     Deep Deterministic Policy Gradient (DDPG)
 
@@ -159,11 +174,6 @@ def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED,
 
     """
 
-
-
-    #logger = EpochLogger(**logger_kwargs)
-    #logger.save_config(locals())
-
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -176,6 +186,16 @@ def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED,
 
     # Create actor-critic module and target networks
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
+
+    # Set up optimizers for policy and q-function
+    pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
+    q_optimizer = Adam(ac.q.parameters(), lr=q_lr)
+
+
+    if checkpoint_continue:
+        load_model(ac, pi_optimizer, q_optimizer, MODEL_PATH)
+        ac.train()
+
     ac_targ = deepcopy(ac)
 
     # Freeze target networks with respect to optimizers (only update via polyak averaging)
@@ -187,7 +207,6 @@ def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED,
 
     # Count variables (protip: try to get a feel for how different size networks behave!)
     var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.q])
-    #logger.log('\nNumber of parameters: \t pi: %d, \t q: %d\n'%var_counts)
     print('\nNumber of parameters: \t pi: %d, \t q: %d\n'%var_counts)
 
     # Set up function for computing DDPG Q-loss
@@ -215,14 +234,6 @@ def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED,
         q_pi = ac.q(o, ac.pi(o))
         return -q_pi.mean()
 
-    # Set up optimizers for policy and q-function
-    pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
-    q_optimizer = Adam(ac.q.parameters(), lr=q_lr)
-
-    # Set up model saving
-    #logger.setup_pytorch_saver(ac)
-
-
     def update(data):
         # First run one gradient descent step for Q.
         q_optimizer.zero_grad()
@@ -246,7 +257,6 @@ def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED,
             p.requires_grad = True
 
         # Record things
-        #logger.store(LossQ=loss_q.item(), LossPi=loss_pi.item(), **loss_info)
         #print('LossQ= ', loss_q.item(), 'LossPi= ', loss_pi.item())
 
         # Finally, update target networks by polyak averaging.
@@ -272,8 +282,8 @@ def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED,
                 o, r, d, _ = test_env.step(get_action(o, 0))
                 ep_ret += r
                 ep_len += 1
-            #logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
             print('TestEpRet (reward) = ', ep_ret, 'TestEpLen= ', ep_len)
+
 
     # Prepare for interaction with environment
     total_steps = steps_per_epoch * epochs
@@ -311,7 +321,6 @@ def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED,
 
         # End of trajectory handling
         if d or (ep_len == max_ep_len):
-            #logger.store(EpRet=ep_ret, EpLen=ep_len)
             print('EpRet (reward) = ', ep_ret, 'EpLen= ', ep_len)
             o, ep_ret, ep_len = env.reset(), 0, 0
 
@@ -331,8 +340,8 @@ def ddpg(env_fn, actor_critic=ACTOR_CRITIC, ac_kwargs=dict(), seed=SEED,
                 #logger.save_state({'env': env}, None)
                 # save the model
                 print('Saving model...')
-                torch.save(ac.state_dict(), MODEL_PATH)
-                #torch.save(ac.state_dict(), CHECKPOINT_PATH + "model_epoch_" + str(epoch) + ".pt")
+                save_model(ac, pi_optimizer, q_optimizer, MODEL_PATH)
+                
 
             print('Testing agent...')
             # Test the performance of the deterministic version of the agent.
